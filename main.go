@@ -24,7 +24,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	var dbPath string
 	var urlsRaw string
 	fs.StringVar(&dbPath, "db", "data.db", "database file path")
@@ -41,7 +41,7 @@ func main() {
 }
 
 func run(ctx context.Context, dbPath string, onlyURLs []string) error {
-	db, err := sql.Open("sqlite3", "file:"+dbPath+"?_pragma=foreign_keys(1)")
+	db, err := sql.Open("sqlite3", "file:"+dbPath+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func run(ctx context.Context, dbPath string, onlyURLs []string) error {
 		return projectsURL.ResolveReference(rel).String()
 	}
 
-	sels, err := get(ctx, "https://www.shapeyourcityhalifax.ca/projects", []string{".project-tile"})
+	sels, err := get(ctx, "https://engagehalifax.ca/projects", []string{"article.project"})
 	if err != nil {
 		return err
 	}
@@ -92,10 +92,7 @@ func run(ctx context.Context, dbPath string, onlyURLs []string) error {
 	for _, project := range sels[0].EachIter() {
 		p := Project{
 			State: project.AttrOr("data-state", ""),
-			URL:   abs(project.Find("a.project-tile__link").AttrOr("href", "")),
-		}
-		if p.URL == "https://www.shapeyourcityhalifax.ca/shape-your-city-halifax" {
-			continue
+			URL:   abs(project.Find("a").AttrOr("href", "")),
 		}
 		if len(onlyURLs) > 0 && !slices.Contains(onlyURLs, p.URL) {
 			continue
@@ -105,24 +102,35 @@ func run(ctx context.Context, dbPath string, onlyURLs []string) error {
 
 	for i, p := range projects {
 		log.Printf("fetching %v/%v %v", i+1, len(projects), p.URL)
-		sels, err := get(ctx, p.URL, []string{"#yield"})
+		sels, err := get(ctx, p.URL, []string{"#content"})
 		if err != nil {
 			return err
 		}
 
 		removes := []string{
-			"#map-layers",
-			"div[data-markers]",
-			"input[name=authenticity_token]",
-			"div.widget_follow_project",
-			"div.widget_related_projects",
-			"#qanda_description_text",
 			"script",
-			".SocialSharing",
-			"[name=a_comment_body]",
+			".hive-block.forum",
 		}
 		for _, s := range removes {
 			sels[0].Find(s).Remove()
+		}
+
+		divIDRemoves := []string{
+			"the_hive_form__viewer",
+			"the_hive_news_feed",
+			"the_hive_stories",
+			"the_hive_events_feed",
+			"the_hive_web_map-viewer",
+		}
+		for _, div := range sels[0].Find("div").EachIter() {
+			for _, id := range divIDRemoves {
+				if strings.Contains(div.AttrOr("id", ""), id) {
+					div.Remove()
+				}
+			}
+			if strings.Contains(div.AttrOr("data-instance-id", ""), "the_hive_social_map__viewer") {
+				div.Remove()
+			}
 		}
 
 		for _, input := range sels[0].Find("input").EachIter() {
@@ -131,6 +139,7 @@ func run(ctx context.Context, dbPath string, onlyURLs []string) error {
 		for _, label := range sels[0].Find("label").EachIter() {
 			label.RemoveAttr("for")
 		}
+
 		for _, a := range sels[0].Find("a").EachIter() {
 			a.SetAttr("href", abs(a.AttrOr("href", "")))
 		}
@@ -138,7 +147,7 @@ func run(ctx context.Context, dbPath string, onlyURLs []string) error {
 			img.SetAttr("src", abs(img.AttrOr("src", "")))
 		}
 
-		p.Title = sels[0].Find("h1").First().Text()
+		p.Title = strings.TrimSpace(sels[0].Find("h1").First().Text())
 		p.HTML, _ = sels[0].Html()
 		p.HTML = gohtml.Format(p.HTML)
 		p.Markdown, err = htmltomarkdown.ConvertString(p.HTML)

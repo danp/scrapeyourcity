@@ -1,3 +1,3 @@
 # scrapeyourcity
 
-Scraping the [Halifax Shape Your City](https://www.shapeyourcityhalifax.ca/) site to sqlite.
+Scraping the [Engage Halifax](https://engagehalifax.ca/) site to sqlite.
